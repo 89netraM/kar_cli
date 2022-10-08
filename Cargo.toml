@@ -1,0 +1,23 @@
+[package]
+name = "kar_cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "^1"
+keyring = "^1"
+reqwest = { version = "^0.11", features = ["json"] }
+rpassword = "^7"
+serde = { version = "^1", features = ["derive"] }
+serde_json = "^1"
+time = { version = "^0.3", features = ["macros", "parsing"] }
+tokio = { version = "^1", features = ["macros", "rt-multi-thread"] }
+url = "^2"
+whoami = "^1"
+
+[profile.release]
+opt-level = 'z'
+lto = true
+codegen-units = 1
+panic = 'abort'
+strip = true
