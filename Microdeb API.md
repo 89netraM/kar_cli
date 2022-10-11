@@ -3,6 +3,8 @@
 Base URL: `https://ragnarok.microdeb.se/api`  
 `appId`: `bf9b5e70-ab62-49d8-95d9-59f8febc265a`
 
+Full API "documentation": https://ragnarok.microdeb.se/swagger/v1/swagger.json
+
 ## Endpoints
 
 * `GET`: `v1/login/<appId>/shortpass?q=<shortpass>`  
@@ -25,7 +27,7 @@ Base URL: `https://ragnarok.microdeb.se/api`
   ```json
   {
   	"amount": <SEK>,
-  	"message": "<Swish message>",
+  	"message": "MPS Microdeb Me",
   	"reference": "<Card number>",
   	"cardNumber": "<Card number>",
   	"userIdentifier": "<User GUID>"

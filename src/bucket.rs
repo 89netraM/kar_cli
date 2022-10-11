@@ -7,7 +7,7 @@ use std::io::{stdin, stdout, Write};
 use keyring::{Entry, Error as KeyError};
 use serde_json::Error as SerdeJsonError;
 
-use super::client::{TokenPairRequest, TokenPairResponse};
+use super::kar_client::{TokenPairRequest, TokenPairResponse};
 
 pub fn read() -> Result<Option<TokenPairResponse>, Error> {
 	let entry = get_entry();

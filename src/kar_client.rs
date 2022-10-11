@@ -1,20 +1,22 @@
-use std::error;
 use core::convert::From;
 use core::fmt::{self, Display};
 use core::str::FromStr;
 use reqwest::{Client as ReqClient, RequestBuilder, Response, StatusCode, Url};
 use serde::Serialize;
 use serde::{de::DeserializeOwned, Deserialize};
-use time::{PrimitiveDateTime, macros::format_description};
+use std::error;
+#[cfg(debug_assertions)]
+use std::error::Error as StdError;
+use time::{macros::format_description, PrimitiveDateTime};
 
-pub struct Client {
+pub struct KarClient {
 	base_url: Url,
 	client: ReqClient,
 	pub access_token: String,
 	pub refresh_token: String,
 }
 
-impl Client {
+impl KarClient {
 	pub fn new(auth_token: String, refresh_token: String) -> Result<Self, Error> {
 		Ok(Self {
 			base_url: option_env!("KÅR_CLI_BASE_URL")
@@ -81,9 +83,12 @@ impl Client {
 	}
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 pub struct BalanceResponse {
+	#[serde(rename = "balance")]
 	pub balance: f64,
+	#[serde(rename = "shortPass")]
+	pub shortpass: String,
 }
 
 #[derive(Serialize)]
@@ -137,7 +142,12 @@ impl Display for Error {
 			Self::Unauthorized(err) => {
 				write!(f, "Unauthorized request ({err})")
 			}
+		}?;
+		#[cfg(debug_assertions)]
+		if let Some(err) = self.source() {
+			write!(f, " ({err})")?;
 		}
+		Ok(())
 	}
 }
 

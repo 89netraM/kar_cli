@@ -1,23 +1,90 @@
 mod bucket;
-mod client;
+mod kar_client;
+mod microdeb_client;
 
-use std::io::{stdin, stdout, Write};
 use core::future::Future;
+use std::io::{stdin, stdout, Write};
 
 use anyhow::Result;
-use rpassword::read_password;
+use clap::{command, Parser, Subcommand};
 
-use client::{Client, Error, Unauthorized};
+use kar_client::{BalanceResponse, Error, KarClient, Unauthorized};
+use microdeb_client::MicrodebClient;
+use qrcode::{render::unicode, QrCode};
+
+use crate::microdeb_client::SwishStatus;
+
+#[derive(Parser)]
+#[command(
+	about = "Gets current balance without explicit command. Top up command lets you specify\namount of SEK to add to your card."
+)]
+struct Cli {
+	#[command(subcommand)]
+	command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+	#[command(name = "topup")]
+	TopUp { amount: u64 },
+}
 
 #[tokio::main]
 async fn main() {
-	let result = act().await;
+	let cli = Cli::parse();
+
+	let result = match cli.command {
+		Some(Commands::TopUp { amount }) => topup(amount).await,
+		None => show_balance().await,
+	};
 	if let Err(err) = result {
 		eprintln!("Error: {err}.");
 	}
 }
 
-async fn act() -> Result<()> {
+async fn show_balance() -> Result<()> {
+	let (client, response) = get_balance_response().await?;
+
+	println!("Your balance is: {:.2} SEK", response.balance);
+
+	bucket::save(&client.access_token, &client.refresh_token)?;
+
+	Ok(())
+}
+
+async fn topup(amount: u64) -> Result<()> {
+	let (kar_client, balance_response) = get_balance_response().await?;
+
+	let microdeb_client = MicrodebClient::new()?;
+
+	let user_info = microdeb_client.login(&balance_response.shortpass).await?;
+	let mut swish_response = microdeb_client
+		.swish_create(amount, &user_info.user.id, &user_info.card.number)
+		.await?;
+	let swish_id = swish_response.id;
+	println!("Swish request ID: {swish_id}");
+
+	let swish_link = format!("swish://paymentrequest?token={}", swish_response.data.token);
+	let swish_qr = QrCode::new(swish_link)?;
+	let qr_text = swish_qr
+		.render::<unicode::Dense1x2>()
+		.dark_color(unicode::Dense1x2::Light)
+		.light_color(unicode::Dense1x2::Dark)
+		.build();
+	println!("{}", qr_text);
+
+	while swish_response.data.status != SwishStatus::Settled {
+		swish_response = microdeb_client.swish_status(&swish_id).await?;
+	}
+
+	println!("Payment complete!");
+
+	bucket::save(&kar_client.access_token, &kar_client.refresh_token)?;
+
+	Ok(())
+}
+
+async fn get_balance_response() -> Result<(KarClient, BalanceResponse), Error> {
 	let mut client = make_client().await?;
 
 	let mut result = client.get_card_balance().await;
@@ -33,53 +100,53 @@ async fn act() -> Result<()> {
 		result = client.get_card_balance().await;
 	}
 
-	let response = result?;
-
-	println!("Your balance is: {:.2} SEK", response.balance);
-
-	bucket::save(&client.access_token, &client.refresh_token)?;
-
-	Ok(())
+	Ok((client, result?))
 }
 
-async fn make_client() -> Result<Client> {
+async fn make_client() -> Result<KarClient, Error> {
 	if let Some(token_pair) = bucket::read().ok().flatten() {
-		Ok(Client::new(token_pair.access_token, token_pair.refresh_token)?)
+		Ok(KarClient::new(token_pair.access_token, token_pair.refresh_token)?)
 	} else {
 		Ok(login_client().await?)
 	}
 }
 
-fn login_client() -> impl Future<Output = Result<Client, Error>> {
+fn login_client() -> impl Future<Output = Result<KarClient, Error>> {
 	let cid = ask("CID: ", read_answer);
-	let password = ask("Password: ", || read_password().unwrap());
+	let password = ask("Password: ", read_password);
 
-	Client::login(cid, password)
+	KarClient::login(cid, password)
 }
 
-fn ask<R>(prompt: &str, read: R) -> String where R: Fn() -> String {
+fn ask<R, O>(prompt: &str, read: R) -> O
+where
+	R: Fn() -> Option<O>,
+{
 	loop {
 		print!("{}", prompt);
 		stdout().flush().unwrap();
-		let answer = read();
-		if !answer.is_empty() {
-			return answer;
+		if let Some(output) = read() {
+			return output;
 		}
 	}
 }
 
-fn read_answer() -> String {
+fn read_answer() -> Option<String> {
 	let mut answer = String::new();
 	stdin().read_line(&mut answer).unwrap();
-	remove_last_new_line(&mut answer);
-	answer
+	trim_to_none(answer)
 }
 
-fn remove_last_new_line(s: &mut String) {
-	s.pop();
-	match s.pop() {
-		Some('\r') => {}
-		Some(c) => s.push(c),
-		_ => {}
+fn read_password() -> Option<String> {
+	rpassword::read_password().ok().and_then(trim_to_none)
+}
+
+fn trim_to_none(mut s: String) -> Option<String> {
+	let l = s.trim_end().len();
+	s.truncate(l);
+	if s.is_empty() {
+		None
+	} else {
+		Some(s)
 	}
 }
